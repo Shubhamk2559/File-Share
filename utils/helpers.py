@@ -8,6 +8,7 @@ utils/helpers.py - Shared helpers.
   * deliver_content(): copies stored files to a user and schedules auto-delete
 """
 import asyncio
+import io
 import logging
 import secrets
 import time
@@ -24,18 +25,9 @@ log = logging.getLogger(__name__)
 
 START_TIME = time.time()
 
-ADMIN_HELP = (
-    "🛠 <b>Admin panel</b>\n\n"
-    "📤 Send any file → get a shareable link\n"
-    "/batch → collect many files, then /done for one link (/cancel to abort)\n"
-    "/stats → bot statistics\n"
-    "/users → user count + full list file\n"
-    "/broadcast → reply to a message to send it to all users\n"
-    "/ban <code>&lt;id&gt; [reason]</code> · /unban <code>&lt;id&gt;</code>"
-)
-
 # ---------------------------------------------------------------- filters --
 batch_sessions: Dict[int, List[int]] = {}  # admin_id -> list of DB-channel message IDs
+ask_sessions: Dict[int, dict] = {}         # admin_id -> {"action": "ban|unban|broadcast", "source": Message}
 
 
 async def _is_admin(_, __, message) -> bool:
@@ -46,8 +38,23 @@ async def _in_batch(_, __, message) -> bool:
     return bool(message.from_user and message.from_user.id in batch_sessions)
 
 
+async def _in_ask(_, __, message) -> bool:
+    return bool(message.from_user and message.from_user.id in ask_sessions)
+
+
+async def _not_command(_, __, message) -> bool:
+    return not (message.text or "").startswith("/")
+
+
+async def _is_admin_cb(_, __, cq) -> bool:
+    return bool(cq.from_user and cq.from_user.id in config.ADMINS)
+
+
 admin_only = filters.create(_is_admin)
+admin_cb = filters.create(_is_admin_cb)
 batch_filter = filters.create(_in_batch)
+ask_filter = filters.create(_in_ask)
+not_command = filters.create(_not_command)
 media_filter = (
     filters.document | filters.video | filters.audio | filters.photo
     | filters.voice | filters.animation | filters.video_note
@@ -104,6 +111,39 @@ def make_token() -> str:
 
 def build_link(client, token: str) -> str:
     return f"https://t.me/{client.me.username}?start={token}"
+
+
+# ------------------------------------------------------- admin report text --
+async def stats_text() -> str:
+    s = await db.get_stats()
+    delete_txt = humanize(config.AUTO_DELETE_SECONDS) if config.AUTO_DELETE_SECONDS else "off"
+    return (
+        "📊 <b>Bot statistics</b>\n\n"
+        f"👥 Users: <b>{s['users']}</b>\n"
+        f"🚫 Banned: <b>{s['banned']}</b>\n"
+        f"📁 Files: <b>{s['files']}</b>\n"
+        f"📦 Batches: <b>{s['batches']}</b>\n"
+        f"⬇️ Deliveries: <b>{s['downloads']}</b>\n"
+        f"🗑 Pending deletions: <b>{s['pending_deletions']}</b>\n\n"
+        f"⏱ Auto-delete: <b>{delete_txt}</b>\n"
+        f"🔐 Protect content: <b>{'on' if config.PROTECT_CONTENT else 'off'}</b>\n"
+        f"🕒 Uptime: <b>{humanize(time.time() - START_TIME)}</b>"
+    )
+
+
+async def send_users_report(client, chat_id: int) -> None:
+    total, banned = await db.count_users(), await db.count_banned()
+    lines = []
+    async for u in db.iter_users():
+        lines.append(
+            f"{u['user_id']} | @{u.get('username') or '-'} | "
+            f"{u.get('first_name') or '-'} | {'BANNED' if u.get('banned') else 'ok'}"
+        )
+    await safe_call(client.send_message, chat_id, f"👥 Total: <b>{total}</b> | 🚫 Banned: <b>{banned}</b>")
+    if lines:
+        bio = io.BytesIO("\n".join(lines).encode("utf-8"))
+        bio.name = "users.txt"
+        await safe_call(client.send_document, chat_id, bio, caption="Full user list")
 
 
 # ------------------------------------------------------------ rate limiter --
