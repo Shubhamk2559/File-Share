@@ -2,12 +2,11 @@
 handlers/admin.py - Admin-only commands and single-file uploads.
 
   Send a file to the bot -> stored in DB channel -> shareable link returned
-  /stats  /users  /ban <id> [reason]  /unban <id>  /help
+  /stats  /users  /ban <id> [reason]  /unban <id>
+  (all of them are also reachable from the Help buttons, see handlers/panel.py)
 """
 import html
-import io
 import logging
-import time
 
 from pyrogram import Client, filters
 from pyrogram.errors import RPCError
@@ -16,20 +15,15 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import config
 from database import mongo as db
 from utils.helpers import (
-    ADMIN_HELP, START_TIME, admin_only, batch_filter, build_link, human_size,
-    humanize, make_token, media_filter, media_info, safe_call,
+    admin_only, ask_filter, batch_filter, build_link, human_size, make_token,
+    media_filter, media_info, safe_call, send_users_report, stats_text,
 )
 
 log = logging.getLogger(__name__)
 
 
-@Client.on_message(filters.command("help") & filters.private & admin_only)
-async def admin_help(client: Client, message):
-    await message.reply_text(ADMIN_HELP)
-
-
 # ----------------------------------------------------------- single upload --
-@Client.on_message(filters.private & admin_only & media_filter & ~batch_filter)
+@Client.on_message(filters.private & admin_only & media_filter & ~batch_filter & ~ask_filter)
 async def upload_single(client: Client, message):
     """Copy the admin's file into the DB channel and return a deep link."""
     try:
@@ -59,37 +53,13 @@ async def upload_single(client: Client, message):
 # ------------------------------------------------------------------- stats --
 @Client.on_message(filters.command("stats") & filters.private & admin_only)
 async def stats_cmd(client: Client, message):
-    s = await db.get_stats()
-    delete_txt = humanize(config.AUTO_DELETE_SECONDS) if config.AUTO_DELETE_SECONDS else "off"
-    await message.reply_text(
-        "📊 <b>Bot statistics</b>\n\n"
-        f"👥 Users: <b>{s['users']}</b>\n"
-        f"🚫 Banned: <b>{s['banned']}</b>\n"
-        f"📁 Files: <b>{s['files']}</b>\n"
-        f"📦 Batches: <b>{s['batches']}</b>\n"
-        f"⬇️ Deliveries: <b>{s['downloads']}</b>\n"
-        f"🗑 Pending deletions: <b>{s['pending_deletions']}</b>\n\n"
-        f"⏱ Auto-delete: <b>{delete_txt}</b>\n"
-        f"🔐 Protect content: <b>{'on' if config.PROTECT_CONTENT else 'off'}</b>\n"
-        f"🕒 Uptime: <b>{humanize(time.time() - START_TIME)}</b>"
-    )
+    await message.reply_text(await stats_text())
 
 
 # ------------------------------------------------------------------- users --
 @Client.on_message(filters.command("users") & filters.private & admin_only)
 async def users_cmd(client: Client, message):
-    total, banned = await db.count_users(), await db.count_banned()
-    lines = []
-    async for u in db.iter_users():
-        lines.append(
-            f"{u['user_id']} | @{u.get('username') or '-'} | "
-            f"{u.get('first_name') or '-'} | {'BANNED' if u.get('banned') else 'ok'}"
-        )
-    await message.reply_text(f"👥 Total: <b>{total}</b> | 🚫 Banned: <b>{banned}</b>")
-    if lines:
-        bio = io.BytesIO("\n".join(lines).encode("utf-8"))
-        bio.name = "users.txt"
-        await message.reply_document(bio, caption="Full user list")
+    await send_users_report(client, message.chat.id)
 
 
 # --------------------------------------------------------------- ban/unban --
