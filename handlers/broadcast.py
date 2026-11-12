@@ -1,9 +1,12 @@
 """
-handlers/broadcast.py - /broadcast (reply to any message).
+handlers/broadcast.py - Broadcast to all users.
 
-Copies the replied-to message to every non-banned user, throttled to respect
-Telegram limits. Dead users (blocked the bot / deactivated) are pruned.
-Runs as a background task so the bot stays responsive.
+  * Button flow (Help -> Broadcast) lives in handlers/panel.py and calls launch().
+  * /broadcast still works: reply to any message with it.
+
+Copies the message to every non-banned user, throttled to respect Telegram limits.
+Dead users (blocked the bot / deactivated) are pruned. Runs as a background task so
+the bot stays responsive.
 """
 import asyncio
 import logging
@@ -63,17 +66,29 @@ async def _run_broadcast(source, status_msg) -> None:
             pass
 
 
+def is_running() -> bool:
+    return _lock.locked()
+
+
+def launch(source, status_msg) -> None:
+    """Start a broadcast of `source` in the background; progress is shown in `status_msg`."""
+    task = asyncio.create_task(_run_broadcast(source, status_msg))
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+
+
 @Client.on_message(filters.command("broadcast") & filters.private & admin_only)
 async def broadcast_cmd(client: Client, message):
     source = message.reply_to_message
     if not source:
-        await message.reply_text("Reply to the message you want to broadcast with /broadcast")
+        await message.reply_text(
+            "Reply to the message you want to broadcast with /broadcast\n"
+            "or use the button: /help → 📢 Broadcast"
+        )
         return
-    if _lock.locked():
+    if is_running():
         await message.reply_text("⚠️ A broadcast is already running.")
         return
 
     status = await message.reply_text("📢 Starting broadcast...")
-    task = asyncio.create_task(_run_broadcast(source, status))
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+    launch(source, status)
