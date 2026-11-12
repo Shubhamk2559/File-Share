@@ -2,11 +2,10 @@
 handlers/start.py - User-facing logic.
 
   * guard (group -1): registers users, enforces bans and anti-flood BEFORE any other handler
-  * /start               -> welcome message
+  * /start               -> welcome message with Help / About / Settings buttons
   * /start <token>       -> force-sub check, then deliver the file(s)
   * "Try Again" callback -> re-check membership and deliver
 """
-import html
 import logging
 import re
 
@@ -16,7 +15,8 @@ from pyrogram.errors import RPCError
 import config
 from database import mongo as db
 from utils import force_sub
-from utils.helpers import ADMIN_HELP, admin_only, deliver_content, limiter, safe_call
+from utils import ui
+from utils.helpers import admin_only, deliver_content, limiter, safe_call
 
 log = logging.getLogger(__name__)
 
@@ -64,22 +64,18 @@ async def guard_callback(client: Client, cq):
 
 
 # ------------------------------------------------------------------ /start --
-def _welcome(name: str) -> str:
-    return (
-        f"👋 Hello <b>{html.escape(name)}</b>!\n\n"
-        "I deliver files shared through special links. "
-        "Open a link someone sent you and I'll do the rest."
-    )
-
-
 @Client.on_message(filters.command("start") & filters.private)
 async def start_cmd(client: Client, message):
     user = message.from_user
     payload = message.command[1] if len(message.command) > 1 else None
 
     if not payload:
-        text = ADMIN_HELP if user.id in config.ADMINS else _welcome(user.first_name or "there")
-        await message.reply_text(text)
+        await message.reply_text(
+            ui.welcome_text(user, client.me),
+            quote=True,
+            reply_markup=ui.home_markup(user.id in config.ADMINS),
+            disable_web_page_preview=True,
+        )
         return
 
     if not TOKEN_RE.match(payload):
@@ -118,10 +114,16 @@ async def retry_callback(client: Client, cq):
     if token and TOKEN_RE.match(token):
         await deliver_content(client, chat_id, token)
     else:
-        await safe_call(client.send_message, chat_id, _welcome(cq.from_user.first_name or "there"))
+        await safe_call(
+            client.send_message,
+            chat_id,
+            ui.welcome_text(cq.from_user, client.me),
+            reply_markup=ui.home_markup(cq.from_user.id in config.ADMINS),
+            disable_web_page_preview=True,
+        )
 
 
 # ------------------------------------------------- anything else (non-admins) --
-@Client.on_message(filters.private & ~admin_only & ~filters.command("start"))
+@Client.on_message(filters.private & ~admin_only & ~filters.command(["start", "help", "id"]))
 async def fallback(client: Client, message):
     await message.reply_text("ℹ️ Please open a file link shared with you to get your files.")
