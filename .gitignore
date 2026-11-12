@@ -1,0 +1,18 @@
+# secrets
+.env
+
+# Telegram sessions
+*.session
+*.session-journal
+sessions/
+
+# python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# runtime
+logs/
+*.log
+.DS_Store

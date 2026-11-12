@@ -1,0 +1,20 @@
+[Unit]
+Description=Telegram File Sharing Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# CHANGE: user that owns the project folder
+User=botuser
+# CHANGE: path where you cloned the repo (the .env is read from here)
+WorkingDirectory=/opt/filesharebot
+ExecStart=/opt/filesharebot/venv/bin/python bot.py
+Restart=always
+RestartSec=5
+# Logs go to journald AND logs/bot.log
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

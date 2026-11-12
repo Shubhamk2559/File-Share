@@ -1,0 +1,24 @@
+services:
+  bot:
+    build: .
+    container_name: filesharebot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - sessions:/app/sessions
+      - logs:/app/logs
+
+  # Optional local MongoDB. Enable with:  docker compose --profile local-db up -d
+  # and set MONGO_URI=mongodb://mongo:27017 in .env
+  mongo:
+    image: mongo:7
+    container_name: filesharebot-mongo
+    restart: unless-stopped
+    profiles: ["local-db"]
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  sessions:
+  logs:
+  mongo_data:
